@@ -36,11 +36,21 @@ curl -X GET \
   $ORIGIN/projects/$PROJECT/locations/$LOCATION/backends/$BACKEND/domains/$DOMAIN
 ```
 
-After our initial scan of your DNS records you'll see a list of instructions in `customDomainStatus.requriedDnsUpdates`. *DO NOT FOLLOW INSTRUCTIONS TO SET A OR CNAME RECORDS YET* (that's what makes this a zero-downtime migration!)
+After our initial scan of your DNS records you'll see a list of instructions in `customDomainStatus.requriedDnsUpdates`. *DO NOT FOLLOW INSTRUCTIONS TO SET A OR CNAME RECORDS ON $DOMAIN YET* (that's what makes this a zero-downtime migration!)
 
-## 3. Pass ownership challenge
+## 3. Mint cert and pass ownership challenge
 
-Make the suggested TXT record change to your DNS config. This will prove to Firebase App Hosting that you own this domain and we should serve your traffic.
+### Mint cert
+
+The `requiredDnsUpdates` field has a set of records for a domain starting with `_acme-challenge` that will ask you to add a CNAME record. Adding that record allows App Hosting to generate SSL certificates for your domain. Once you add that record, your domain's `customDomainStatus.certState` field should be `CERT_ACTIVE` within about an hour, indicating that App Hosting has successfully generated a certificate.
+
+#### Pass ownership challenge
+
+App Hosting uses DNS records to determine which Backend's content to serve when it recieves requests for your domain. For zero-downtime migration, you'll need to add a TXT record instructing App Hosting to serve content for the custom domain you just created. The record data will be a string in the form `fah-claim=[token]`.
+
+If you're adding an apex domain (e.g. foo.com) the `requiredDnsUpdates` field will have that TXT record under it. If you're migrating a subdomain (e.g. www.foo.com), the record won't be displayed in `requiredDnsUpdates`, but you can generate one yourself by replacing `[token]` with `002-02-` plus the contents of your domain's `uid` field. It should look something like this: `fah-claim=002-02-########-####-####-####-############`.
+
+Once you add the TXT record, your domain's `customDomainStatus.ownershipState` should be `OWNERSHIP_ACTIVE` within about an hour, indicating that App Hosting will serve content for your custom domain's Backend when it recieves requests for your domain.
 
 ## 4. Wait
 
@@ -48,4 +58,12 @@ Occassionally re-check the status of your domain record. You're looking for `cus
 
 ## 5. Set A record
 
-*Now* it's safe to modify your A record according to `customDomainStatus.requiredDnsUpdates.desired`. Make the change and wait for DNS to propegate. Your site will migrate to Firebase App Hosting with zero downtime.
+*Now* it's safe to modify your A record(s) to start sending traffic to App Hosting. 
+
+If you're regestring an apex domain (e.g. foo.com), you can simply add the A record displayed in the `customDomainStatus.requiredDnsUpdates.desired` record set. If you're adding a subdomain (e.g. www.foo.com), you'll have to find the correct A record for yourself; to do so, use a tool like [dig](https://toolbox.googleapps.com/apps/dig/) to query the CNAME record listed in `customDomainStatus.requiredDnsUpdates.desired`. It should return exactly 1 A record, which you should add to your domain. 
+
+Be sure to also remove any A or AAAA records from your previous provider, to ensure all traffic is routed to App Hosting.
+
+## 6. All done!
+
+Once your A record change propagates, App Hosting will start receiving requests for your domain. Some time after that, the `customDomainStatus.hostState` will flip to `HOST_ACTIVE`. Don't worry if you start seeing App Hosting content on your domain before that state changes--`hostState` is purely informational, App Hosting's way of letting you know that it's seen your successful A record change.
